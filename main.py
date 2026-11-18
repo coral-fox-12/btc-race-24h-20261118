@@ -45,18 +45,18 @@ _confirm = 0
 _armed = True
 
 
-def _trailing_return_bps():
-    """The trailing 60-bar return of the latest close, in bps, or None.
+def _trailing_return():
+    """The closes the trailing 60-bar return is computed from, or None.
 
-    Exact integer comparison form: the caller compares
-    (now - then) * 10000 against a threshold times `then`, so no division
-    ever happens and the sign is exact.
+    Returns the pair (now, then): the latest close and the close 60 bars
+    before it. Callers compare them in exact integer form,
+    (now - then) * 10_000 against a threshold times `then`, so no division
+    ever happens and the sign of the comparison is exact. None until 61
+    closes have been seen, i.e. until the first bar the return is defined on.
     """
     if len(_closes) <= LOOKBACK_BARS:
         return None
-    now = _closes[-1]
-    then = _closes[-1 - LOOKBACK_BARS]
-    return now, then
+    return _closes[-1], _closes[-1 - LOOKBACK_BARS]
 
 
 def _above(now, then, bps):
@@ -76,7 +76,7 @@ def on_batch(state, batch):
         if close is not None:
             _closes.append(close)
 
-    ret = _trailing_return_bps()
+    ret = _trailing_return()
     held = state.positions.get(SYMBOL)
 
     if held is not None:
@@ -86,6 +86,9 @@ def on_batch(state, batch):
             _armed = False
             return [{"side": "sell", "symbol": SYMBOL, "qty": held.qty,
                      "max_slippage_bps": MAX_SLIPPAGE_BPS}]
+        # The stop-loss never fired on the dev window, and it is kept anyway:
+        # it is insurance for the unseen race window, capping any single
+        # trade entered just before a sharp drop at about -1% plus costs.
         value = state.value(SYMBOL, held.qty)
         cost = held.cost
         if cost > 0:
